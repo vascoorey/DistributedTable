@@ -38,7 +38,6 @@ int table_skel_init(int n_lists, char *filename) {
     }
 
     if(!sharedPtable) {
-
         //cria e verifica uma nova tabela
         struct table_t *sharedTable;
         if((sharedTable = table_create(n_lists)) == NULL) {
@@ -61,6 +60,9 @@ int table_skel_init(int n_lists, char *filename) {
             pmanager_destroy(sharedPmanager);
             return -1;
         }
+		
+		// Garbage collection
+		ptable_collect_garbage(sharedPtable);
     }
 
     //em caso de sucesso
@@ -207,19 +209,17 @@ int invoke(struct message_t *msg) {
             case OP_RT_GETTS:
                 // table_get: (struct table_t* char*) -> (int)
                 if(msg->content.key) {
-                    key = msg->content.key;
+                    key = strdup(msg->content.key);
+					free(msg->content.key);
 
                     // Verifica a validade da resposta
                     if((msg->content.timestamp = ptable_get_ts(sharedPtable, key)) < 0) {
                             msg->opcode = OP_RT_ERROR;
 							msg->c_type = CT_RESULT;
                             msg->content.result = -1;
-                    }
-
-                    if(msg->content.timestamp >= 0) {
+                    } else if(msg->content.timestamp >= 0) {
                         msg->opcode ++; // Incrementa para dizer que esta mensagem contem o resultado
                         msg->c_type = CT_TIMESTAMP;
-                        free(key);
                     }
                 }
                 else {
@@ -227,6 +227,7 @@ int invoke(struct message_t *msg) {
                     msg->c_type = CT_RESULT;
                     msg->content.result = -1;
                 }
+				free(key);
             break;
 
             default:
@@ -242,4 +243,8 @@ int invoke(struct message_t *msg) {
         retVal = -1;
     }
     return retVal;
+}
+
+void table_skel_collect() {
+	ptable_collect_garbage(sharedPtable);
 }

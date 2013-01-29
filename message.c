@@ -32,7 +32,7 @@
  */
 int message_to_string(struct message_t *msg, char **msg_str) {
 	int messageLength = -1; // Tamanho base "## ## "
-	if(msg && msg_str) {
+	if(msg) {
 		// Tamanho minimo da string: OPCODE_SIZE + C_TYPE_SIZE + 2 (espaços) + tamanho dados a enviar em string
 		switch (msg->c_type) {
 			case CT_ENTRY:
@@ -73,7 +73,7 @@ int message_to_string(struct message_t *msg, char **msg_str) {
 		ERROR("NULL msg");
 	}
 	//printf("M: %s\n", *msg_str);
-	return (int)strlen(*msg_str);
+	return *msg_str ? (int)strlen(*msg_str) : -1;
 }
 
 /*
@@ -82,6 +82,7 @@ int message_to_string(struct message_t *msg, char **msg_str) {
 struct message_t *string_to_message(char *msg_str) {
 	char *tempStr;
 	struct message_t *message = NULL;
+	//printf("Mensagem: %s\n", msg_str);
 	if(msg_str && (message = (struct message_t*)malloc(sizeof(struct message_t)))) {
 		if(sscanf(msg_str, "%hd %hd", &message->opcode, &message->c_type) == 2) {
 			if(((int)floor(log10((double)message->opcode)) + 1) == 2 && ((int)floor(log10((double)message->c_type)) + 1) == 2) {
@@ -125,7 +126,10 @@ struct message_t *string_to_message(char *msg_str) {
 						}
 						break;
 					case CT_TIMESTAMP:
-						if((message->content.timestamp = string_to_timestamp(tempStr)) == -1) {
+						//printf("TS String: %s\n", tempStr);
+						if(strcmp(tempStr, ZERO) == 0) {
+							message->content.timestamp = 0;
+						} else if((message->content.timestamp = string_to_timestamp(tempStr)) == -1) {
 							ERROR("string_to_timestamp");
 							free(message);
 							message = NULL;
@@ -262,7 +266,7 @@ int value_to_string(short opcode, struct data_t *value, char **msg_str) {
 		ERROR("NULL data");
 		return -1;
 	}
-	
+
 	encode_timestamp(value->timestamp, &encodedSize, &ts);
 	if(encodedSize <= 0) {
 		ERROR("encode_timestamp");
@@ -362,7 +366,12 @@ int keys_to_string(short opcode, char **keys, char **msg_str) {
  */
 int key_to_string(short opcode, char *key, char **msg_str) {
 	// Qual o tamanho da key?
-	int messageLength = 7 + (int)strlen(key); // '\0'
+	int messageLength = 7; // '\0'
+	if(key) {
+		messageLength += strlen(key);
+	} else {
+		return -1;
+	}
 	if((*msg_str = (char*)malloc(messageLength))) {
 		sprintf(*msg_str, "%hd %hd %s", opcode, (short)CT_KEY, key);
 	} else {
@@ -421,13 +430,11 @@ int timestamp_to_string(short opcode, long timestamp, char **msg_str) {
 
 void encode_timestamp(long timestamp, size_t *encoded_size, char **out_string) {
 	int numDigits;
-	char *ts;
+	char *ts = NULL;
 	
 	if(timestamp < 0) {
-		ERROR("Invalid timestamp");
-		*encoded_size = -1;
-		*out_string = NULL;
-		return;
+		//ERROR("Invalid timestamp, defaulting at 0");
+		timestamp = 0;
 	}
 	
 	numDigits = (timestamp == 0 ? 1 : (int)(floor(log10((double)timestamp))) + 1);
@@ -452,7 +459,7 @@ void encode_timestamp(long timestamp, size_t *encoded_size, char **out_string) {
  *	Retorna o entry_t se correu tudo bem ou NULL em caso de erro.
  */
 struct entry_t *string_to_entry(char *msg_str) {
-	int counter = 0, isDel = 0;
+	int isDel = 0;
 	char *key = NULL, *encodedString = NULL, *decodedString = NULL, *restOfTheString = NULL, *ts = NULL, *decodedTs;
 	size_t decodedSize, tsSize;
 	struct entry_t *entry = NULL;
@@ -467,7 +474,9 @@ struct entry_t *string_to_entry(char *msg_str) {
 		}
 		//printf("decomposta, ts: %s, key: %s, data: %s\n", ts, key, encodedString);
 		if((isDel || base64_decode_alloc(encodedString, strlen(encodedString), &decodedString, &decodedSize)) &&
+		   //printf("******\nDecoding ts: %s\n********\n", ts) &&
 		   base64_decode_alloc(ts, strlen(ts), &decodedTs, &tsSize)) {
+			decodedTs[tsSize] = '\0';
 			// Criar o entry
 			if(!(entry = entry_create(key, data_create2((int)decodedSize, decodedString)))) {
 				ERROR("entry_create ou data_create2");
@@ -583,9 +592,8 @@ char **string_to_keys(char *msg_str) {
  * Converte uma string num struct data_t
  *	Retorna o data_t se correu tudo bem ou NULL em caso de erro.
  */
-// TODO: a string agora tem um TS e os DADOS
 struct data_t *string_to_value(char *msg_str) {
-	char *decodedString = NULL, *encoded, *rest, *workString;
+	char *decodedString = NULL, *encoded, *workString;
 	size_t decodedSize;
 	struct data_t *value = NULL;
 	
@@ -596,37 +604,36 @@ struct data_t *string_to_value(char *msg_str) {
 	
 	//printf("Data: %s\n", msg_str);
 	
-	encoded = strdup(strtok_r(workString, " ", &rest));
+	encoded = strtok(workString, " ");
+	//printf("encoded: %s\n", encoded);
 	if(encoded) {
 		if(!(value = data_create(0))) {
 			ERROR("data_create");
 			free(workString);
 			return NULL;
 		}
-		if((value->timestamp = string_to_timestamp(encoded)) == -1) {
+		if(strcmp(encoded, ZERO) == 0) {
+			value->timestamp = 0;
+		} else if((value->timestamp = string_to_timestamp(encoded)) == -1) {
 			ERROR("string_to_timestamp");
 			free(workString);
 			return NULL;
-		} else {
-			printf("Timestamp: %ld\n", value->timestamp);
 		}
-		free(encoded);
+		//free(encoded);
 	} else {
 		ERROR("base64_decode_alloc");
 		free(workString);
 		return NULL;
 	}
 	
-	encoded = strdup(strtok_r(NULL, "\0", &rest));
+	encoded = strtok(NULL, " \0");
 	//printf("Decoding: %s\n", encoded);
 	base64_decode_alloc(encoded, strlen(encoded), &decodedString, &decodedSize);
+
 	if(decodedString) {
-		if(decodedSize > 1) {
-			value->data = decodedString;
-			value->datasize = (int)strlen(decodedString);
-		}
+		value->data = decodedString;
+		value->datasize = (int)decodedSize;
 		free(workString);
-		free(encoded);
 	} else {
 		ERROR("base64_decode_alloc");
 		data_destroy(value);
@@ -641,11 +648,14 @@ long string_to_timestamp(char *msg_str) {
 	size_t decodedSize = 0;
 	long ret = -1;
 	if(*msg_str) {
-		//printf("A descodificar: %s --> ", msg_str);
+		//printf("A descodificar: %s (%d) --> ", msg_str, strlen(msg_str));
 		base64_decode_alloc(msg_str, strlen(msg_str), &decodedTs, &decodedSize);
 		if(decodedTs) {
+			decodedTs[decodedSize] = '\0';
+			//printf("%s (%d) --> ", decodedTs, strlen(decodedTs));
+			//decodedTs[strlen(decodedTs)] = '\0';
 			ret = atol(decodedTs);
-			printf("%ld\n", ret);
+			//printf("%ld\n", ret);
 			free(decodedTs);
 		}
 	} else {

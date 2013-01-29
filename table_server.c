@@ -13,6 +13,8 @@
 #include "message.h"
 #include "remote_table.h"
 
+#define GARBAGE_COLLECTION_TIME 300
+
 int shutdownServer = 1;
 int relogioLogico = 0;
 
@@ -122,6 +124,8 @@ int main(int argc, char **argv) {
 		perror("table_skel_init");
 		exit(-1);
 	}
+
+	time_t lastTime = time(NULL), currentTime;
 	
 	// O 0 no poll é o timeout, queremos ficar escutando.
 	while((retVal = poll(ufd, 10, 0)) != -1 && shutdownServer) {
@@ -160,7 +164,14 @@ int main(int argc, char **argv) {
 				}
 			}
 		}
+		currentTime = time(NULL);
+		if((currentTime - lastTime) > GARBAGE_COLLECTION_TIME) {
+			printf("*** Collecting Garbage ***\n");
+			table_skel_collect();
+			lastTime = currentTime;
+		}
 	}
+
 	// Iremos encerrar o servidor ! Fecha tudo no ufd e libera tudo o que foi alocado.
 	for(pollCounter = 0; pollCounter < 10; pollCounter ++) {
 		if(ufd[pollCounter].fd > 0) {
@@ -252,8 +263,9 @@ int server_send_receive(struct pollfd connection) {
 					//printf("Resposta: %s ... ", buffer);
 					printf("Resposta enviada com sucesso.\n");
 				}
+				free(buffer);
 			}
-			free(buffer);
+			//free(buffer);
 			retVal = 0;
 		}
 	}

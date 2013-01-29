@@ -25,4 +25,6 @@ int table_skel_destroy();
  */
 int invoke(struct message_t *msg);
 
+void table_skel_collect();
+
 #endif

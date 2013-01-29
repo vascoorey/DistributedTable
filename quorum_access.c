@@ -10,7 +10,7 @@
 #include "quorum_access-private.h"
 #include "remote_table-private.h"
 #include "entry.h"
-//#include "message.h"
+#include "table.h"
 
 static int request_id = 0;
 static struct quorum_access_t *shared_quorum = NULL;
@@ -79,7 +79,7 @@ int init_quorum_access(struct rtable_t **rtable, int n) {
  */
 struct quorum_op_t **quorum_access(struct quorum_op_t *request, int expected_replies) {
 	int i, replies = 0;
-	struct task_t *task = NULL, *completed_task, *temp;
+	struct task_t *task = NULL, *completed_task;
 	struct quorum_op_t **ret = malloc(sizeof(struct quorum_op_t*) * shared_quorum->n_threads);
 	
 	if(!ret) {
@@ -118,7 +118,7 @@ struct quorum_op_t **quorum_access(struct quorum_op_t *request, int expected_rep
 				free(completed_task->task);
 				replies ++;
 			}
-			free(completed_task);
+			//free(completed_task);
 		}
 	}
 	clear_tasks();
@@ -216,6 +216,10 @@ void *qa_pipe_handler(sig_t sig) {
 		quit = quit_and_cleanup;
 		pthread_mutex_unlock(&check_quit);
 	}
+	if(quit) {
+		// Infelizmente não encontro melhor maneira de terminar uma thread que esta a tentar recuperar uma ligação perdida.
+		pthread_exit(NULL);
+	}
 }
 
 void qa_exit_handler(void *table) {
@@ -232,7 +236,7 @@ void *worker_thread_function(void *arg) {
 	struct entry_t *entry;
 	struct qa_table_t *table = (struct qa_table_t *)arg;
 	bool quit = false;
-	int i = 0, old_type;
+	int i = 0;
 	
 	//pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, &old_type);
 	//pthread_cleanup_push(&qa_exit_handler, table);
@@ -285,11 +289,7 @@ void *worker_thread_function(void *arg) {
 						task->task->opcode = OP_RT_ERROR;
 						task->task->content.result = -1;
 					}
-					if((task->task->content.value = rtable_get(table->table, key))) {
-						//printf("Apanhei ts: %ld, size: %d\n", task->task->content.value->timestamp, task->task->content.value->datasize);
-					} else {
-						//printf("Entrada n encontrada...\n");
-					}
+					task->task->content.value = rtable_get(table->table, key);
 					free(key);
 					key = NULL;
 					break;
@@ -314,7 +314,7 @@ void *worker_thread_function(void *arg) {
 					}
 					//free(task->task->content.key);
 					task->task->content.timestamp = rtable_get_ts(table->table, key);
-					printf("Timestamp %s: %ld\n", key, task->task->content.timestamp);
+					//printf("Timestamp %s: %ld\n", key, task->task->content.timestamp);
 					free(key);
 					key = NULL;
 					break;
@@ -440,7 +440,19 @@ void clear_completed_tasks() {
 	while(done) {
 		//printf("A limpar as task_t's...\n");
 		task = done->next;
-		free(done->task);
+		if(done->task) {
+			switch (done->task->opcode) {
+				case OP_RT_GET:
+					data_destroy(done->task->content.value);
+					break;
+				case OP_RT_GETKEYS:
+					table_free_keys(done->task->content.keys);
+					break;
+				default:
+					break;
+			}
+			free(done->task);
+		}
 		free(done);
 		done = task;
 	}

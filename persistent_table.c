@@ -14,6 +14,8 @@
 #include "message.h"
 #include "message-private.h"
 #include "utils.h"
+#include "list.h"
+#include "list-private.h"
 
 /*
  * Abre o acesso a uma tabela persistente, passando como parâmetro a tabela
@@ -128,12 +130,12 @@ int ptable_put(struct ptable_t *table, char *key, struct data_t *data) {
     char *encodedData;
     int encodedSize;
     if(data->data) {
-		printf("Data tem dados...\n");
+		//printf("Data tem dados...\n");
 		if((encodedSize = base64_encode_alloc(data->data, data->datasize, &encodedData)) < 0) {
 			ERROR("persistent_table: base64_encode_alloc");
 			return -1;
 		}
-    } else if((encodedSize = base64_encode_alloc("0", 1, &encodedData)) < 0) {
+    } else if((encodedSize = base64_encode_alloc("0", 2, &encodedData)) < 0) {
 		ERROR("persistent_table: base64_encode_alloc");
 		return -1;
 	}
@@ -145,16 +147,19 @@ int ptable_put(struct ptable_t *table, char *key, struct data_t *data) {
 		ERROR("encode_timestamp");
 		return -1;
 	}
+	
+	ts[encodedTsSize] = '\0';
+	encodedData[encodedSize] = '\0';
 
-    char *msg;                  //formato: "put TS-BASE64 key DATA-BASE64"
-    if((msg = (char *) malloc(sizeof(char) * (7 + strlen(key) + encodedSize + strlen(ts)))) == NULL) {
+    char *msg = NULL; //formato: "put TS-BASE64 key DATA-BASE64"
+    if((msg = (char *) malloc(sizeof(char) * (7 + strlen(key) + encodedSize + encodedTsSize))) == NULL) {
         ERROR("persistent_table: malloc msg");
         return -1;
     }
 
     sprintf(msg, "put %s %s %s", ts, key, encodedData);
-	free(ts);
-	printf("Log: %s\n", msg);
+
+	//printf("Log: %s -> %d\n", msg, (int)strlen(msg));
 	if(PRINT_LATENCIES) {
 		gettimeofday(&start, NULL);
 	}
@@ -198,6 +203,7 @@ int ptable_put(struct ptable_t *table, char *key, struct data_t *data) {
 
     //em caso de sucesso
     free(msg);
+	free(ts);
 	free(encodedData);
     return 0;
 
@@ -280,7 +286,7 @@ int ptable_del(struct ptable_t *table, char *key) {
  * Devolve o número de elementos da tabela.
  */
 int ptable_size(struct ptable_t *table) {
-
+	
     if(table) {
         return table_size(table->table);
     }
@@ -295,7 +301,6 @@ int ptable_size(struct ptable_t *table) {
  * e um último elemento a NULL.
  */
 char **ptable_get_keys(struct ptable_t *table) {
-
     if(table) {
         return table_get_keys(table->table);
     }
@@ -334,8 +339,32 @@ long ptable_get_ts(struct ptable_t *ptable, char *key) {
         return ts;
     }
 	
-	printf("Timestamp encontrado: %ld\n", ts);
+	//printf("Timestamp encontrado: %ld\n", ts);
     // Em caso de sucesso
     return ts;
 
+}
+
+int ptable_collect_garbage(struct ptable_t *ptable) {
+	if(!ptable) {
+		return -1;
+	}
+	struct table_t *table = ptable->table;
+	struct node_t *node = NULL, *nextNode;
+	int currentList = 0, element = 0, max = 0;
+	for(currentList = 0; currentList < table->hashSize; currentList ++) {
+		node = table->table[currentList]->head;
+		max = table->table[currentList]->elements;
+		element = 0;
+		while(node && element < max) {
+			nextNode = node->next;
+			if(memcmp(node->entry->value->data, "0", 1) == 0 && node->entry->value->datasize == 1) {
+				printf("Deleting key: %s\n", node->entry->key);
+				table_del(table, node->entry->key);
+			}
+			element ++;
+			node = nextNode;
+		}
+	}
+	return 0;
 }

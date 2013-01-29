@@ -159,6 +159,7 @@ struct message_t *network_send_receive(struct rtable_t *rtable, struct message_t
     }
     else {
         //descodifica a mensagem e verifica-a
+		//printf("Decoding: %s\n", bufferReceived);
         if((rsp = string_to_message(bufferReceived)) == NULL) {
             ERROR("network_client: string_to_message");
         }

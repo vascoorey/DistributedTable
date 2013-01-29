@@ -214,7 +214,7 @@ int pmanager_log(struct pmanager_t *pmanager, char *msg) {
 		if((pmanager->current_log_size + sizeof(size) + strlen(msg) + 1) < pmanager->max_log_size) {
 			printf("A escrever: %s\n", msg);
 			if(write(pmanager->log_fd, &size, sizeof(size)) == sizeof(size) && 
-			   write(pmanager->log_fd, msg, size + sizeof(int)) == strlen(msg) + sizeof(int)) {
+			   write(pmanager->log_fd, msg, size) == size) {
 				pmanager->current_log_size += sizeof(int) + strlen(msg) + 1;
 				return 0;
 			} else {
@@ -241,7 +241,7 @@ int pmanager_log(struct pmanager_t *pmanager, char *msg) {
  */
 int pmanager_store_table(struct pmanager_t *pmanager, struct table_t *table) {
 	struct entry_t **entries;
-	char *data, *string_to_print, *ts, *encodedTs;
+	char *data, *string_to_print, *encodedTs;
 	int counter = 0, ret = 0, encoded_size, stringSize, fileOk = -2;
 	size_t encodedSize;
 	
@@ -357,57 +357,68 @@ int table_fill(int fd, struct table_t *table) {
 			if(read(fd, &size, sizeof(int)) == sizeof(int)) {
 				if(size == -2) {
 					fileOk = 1;
-				} else if(!(string = (char*)malloc(size + 1))) {
-					ERROR("malloc");
-					return -1;
-				}
-				if(!read(fd, string, size) == size) {
-					ERROR("bad file");
-					free(string);
-					return -1;
-				}
-				string[size] = '\0';
-				if(!((encodedTs = strdup(strtok_r(string, " \0", &rest))) && (keyString = strdup(strtok_r(NULL, " ", &rest))) && 
-				   (encodedData = strdup(strtok_r(NULL, "\0", &rest))))) {
-					ERROR("strdup");
-					if(keyString) {
-						free(keyString);
-					}
-					free(string);
-					return -1;
-				}
-				if(encodedData) {
-					encodedSize = (int)strlen(encodedData);
-				} else {
-					encodedSize = 0;
-					decodedData = NULL;
-				}
-				if(encodedSize == 0 || base64_decode_alloc(encodedData, encodedSize, &decodedData, &decodedSize)) {
-					if(!(data = data_create2((int)decodedSize, decodedData))) {
-						ERROR("data_create");
-						return -1;
-					}
-					if(base64_decode_alloc(encodedTs, strlen(encodedTs), &decodedTs, &decodedSize)) {
-						data->timestamp = atol(decodedTs);
-						if(table_put(table, keyString, data) == -1) {
-							ERROR("table_put");
-							return -1;
+				} else if((string = (char*)malloc(size + 1))) {
+					if(read(fd, string, size) == size) {
+						string[size] = '\0';
+						if((encodedTs = strdup(strtok_r(string, " \0", &rest))) && (keyString = strdup(strtok_r(NULL, " ", &rest))) && 
+						   (encodedData = strdup(strtok_r(NULL, "\0", &rest)))) {
+							if(encodedData) {
+								encodedSize = (int)strlen(encodedData);
+							} else {
+								encodedSize = 0;
+								decodedData = NULL;
+							}
+							if(encodedSize == 0 || base64_decode_alloc(encodedData, encodedSize, &decodedData, &decodedSize)) {
+								if((data = data_create2((int)decodedSize, decodedData))) {
+									if(base64_decode_alloc(encodedTs, strlen(encodedTs), &decodedTs, &decodedSize)) {
+										decodedTs[decodedSize] = '\0';
+										data->timestamp = atol(decodedTs);
+										if(table_put(table, keyString, data) == -1) {
+											ERROR("table_put");
+											ok = 0;
+											ret = -1;
+										}
+										free(decodedTs);
+									} else {
+										ERROR("base64_decode_alloc");
+										ret = -1;
+									}
+									data_destroy(data);
+								} else {
+									ERROR("data_create");
+									ret = -1;
+									ok = 0;
+								}
+								free(encodedData);
+							} else {
+								ERROR("base64_decode_alloc");
+								free(encodedData);
+								ret = -1;
+								ok = 0;
+							}
+							free(keyString);
+							free(string);
+							free(encodedTs);
+						} else {
+							ERROR("strdup");
+							if(keyString) {
+								free(keyString);
+							}
+							free(string);
+							ret = -1;
+							ok = 0;
 						}
-						free(decodedTs);
 					} else {
-						ERROR("base64_decode_alloc");
+						ERROR("bad file");
+						free(string);
 						ret = -1;
+						ok = 0;
 					}
-					data_destroy(data);
-					free(encodedData);
 				} else {
-					ERROR("base64_decode_alloc");
-					free(encodedData);
-					return -1;
+					ERROR("malloc");
+					ret = -1;
+					ok = 0;
 				}
-				free(keyString);
-				free(string);
-				free(encodedTs);
 			} else {
 				// Já não temos nada para ler
 				ok = 0;
@@ -420,7 +431,7 @@ int table_fill(int fd, struct table_t *table) {
 		}
 	} else {
 		ERROR("NULL table");
-		return -1;
+		ret = -1;
 	}
 	return ret;
 	
@@ -541,11 +552,11 @@ int execute_log(int fd, struct table_t *table) {
 int run_line(char *line, struct table_t *table) {
 	int retVal = 0;
 	size_t decodedSize;
-	char *key, *encodedData = NULL, *op, *dup, *decodedData = NULL, *encodedTs = NULL, *decodedTs = NULL;
-	struct data_t *data;
+	char *key = NULL, *encodedData = NULL, *op = NULL, *dup = NULL, *decodedData = NULL, *encodedTs = NULL, *decodedTs = NULL;
+	struct data_t *data = NULL;
 	
-	if(strlen(line) > 0) {
-		if(line && (dup = strdup(line))) {
+	if(line && strlen(line) > 0) {
+		if((dup = strdup(line))) {
 			op = strdup(strtok(dup, " \0"));
 			if(op && strcmp(op, "del") == 0) {
 				if((key = strtok(NULL, " \0"))) {
@@ -563,15 +574,14 @@ int run_line(char *line, struct table_t *table) {
 					if((base64_decode_alloc(encodedData, strlen(encodedData), &decodedData, &decodedSize))) {
 						if((data = data_create2((int)decodedSize, decodedData))) {
 							if((base64_decode_alloc(encodedTs, strlen(encodedTs), &decodedTs, &decodedSize))) {
+								decodedTs[decodedSize] = '\0';
 								printf("Timestamp recuperado: %ld\n", atol(decodedTs));
 								data->timestamp = atol(decodedTs);
 								retVal = table_put(table, key, data);
-								free(decodedTs);
 							} else {
 								ERROR("base64_decode_alloc: timestamp");
 								retVal = -1;
 							}
-							data_destroy(data);
 						} else {
 							ERROR("data-create2");
 							retVal = -1;
@@ -580,23 +590,35 @@ int run_line(char *line, struct table_t *table) {
 						ERROR("base64_decode_alloc");
 						retVal = -1;
 					}
-					free(key);
-					free(encodedData);
 				} else {
 					ERROR("log corrompido!");
 					retVal = -1;
 				}
-				free(op);
 			} else {
 				ERROR("log corrompido ou malloc.");
 				retVal = -1;
 			}
-			free(dup);
+
 		} else {
-			ERROR("NULL table or line");
+			ERROR("strdup");
 			retVal = -1;
 		}
+		if(key)
+			free(key);
+		if(encodedData)
+			free(encodedData);
+		if(encodedTs)
+			free(encodedTs);
+		if(dup)
+			free(dup);
+		if(decodedTs)
+			free(decodedTs);
+		if(op)
+			free(op);
+		if(data)
+			data_destroy(data);
 	}
+	
 	return retVal;
 	
 }

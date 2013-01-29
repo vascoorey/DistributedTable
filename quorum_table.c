@@ -253,14 +253,14 @@ int qtable_put(struct qtable_t *qtable, char *key, struct data_t *data) {
     // Verifica as respostas
     for(i = 0; i < qtable->numServers; i++) {
         if(ret[i] && (ret[i]->content.result != 0)) {
-            /*ERROR("invalid put");
+            //ERROR("invalid put");
             free(op);
             free(tempKey);
             qtable_free_quorum_op_t(ret, qtable->numServers);
             data_destroy(tempData);
             entry_destroy(tempEntry);
-            return -1;*/
-			printf("tivemos um erro.\n");
+            return -1;
+			//printf("tivemos um erro.\n");
         }
     }
 
@@ -270,7 +270,7 @@ int qtable_put(struct qtable_t *qtable, char *key, struct data_t *data) {
     qtable_free_quorum_op_t(ret, qtable->numServers);
     //data_destroy(tempData);
     entry_destroy(tempEntry);
-	printf("qtable_put: done!\n");
+	//printf("qtable_put: done!\n");
     return 0;
 
 }
@@ -281,7 +281,7 @@ int qtable_put(struct qtable_t *qtable, char *key, struct data_t *data) {
  */
 struct data_t *qtable_get(struct qtable_t *qtable, char *key) {
 
-    int i = -1;              // Usado em ciclos
+    int i = -1, b;              // Usado em ciclos
     long maxTS = -1;     // Regista o maior timestamp
     int diff = -1;      // Regista uma divergência de valores
     int index = -1;          // Regista o índice de uma data com o maior timestamp
@@ -324,7 +324,9 @@ struct data_t *qtable_get(struct qtable_t *qtable, char *key) {
 
     // Compara os valores recebidos na resposta
     for(i = 0; i < qtable->numServers; i++) {
-        if(ret[i] && (ret[i]->content.timestamp > maxTS)) {
+		//printf("Timestamp %d: %ld\n", i, ret[i]->content.value->timestamp);
+        if(ret[i] && (ret[i]->content.value->timestamp > maxTS) && 
+		   memcmp(ret[i]->content.value, "0", 1) != 0 && ret[i]->content.value->datasize != 1) {
 			//printf("********** %ld, %ld\n", maxTS, ret[i]->content.timestamp);
             maxTS = ret[i]->content.timestamp;
             diff++;
@@ -336,7 +338,7 @@ struct data_t *qtable_get(struct qtable_t *qtable, char *key) {
 		// Duplica a data
 		
 		if(ret[index]->content.value && (data = data_dup(ret[index]->content.value)) == NULL) {
-			//ERROR("data_dup");
+			ERROR("data_dup");
 			// Entrada não existe
 			free(op);
 			free(tempKey);
@@ -344,6 +346,7 @@ struct data_t *qtable_get(struct qtable_t *qtable, char *key) {
 			return NULL;
 		}
 	} else {
+		//printf("Indice: %d\n", index);
 		return NULL;
 	}
 
@@ -383,7 +386,7 @@ struct data_t *qtable_get(struct qtable_t *qtable, char *key) {
         qtable_free_quorum_op_t(ret, qtable->numServers);
 
         // Recebe as respostas dos vários servidores
-        if((ret = quorum_access(op, ceil((qtable->numServers - 1)/2))) == NULL) {
+        if((ret = quorum_access(op, (qtable->numServers/2) + 1)) == NULL) {
             ERROR("quorum_access OP_RT_PUT");
             free(op);
             free(tempKey);
@@ -410,11 +413,26 @@ struct data_t *qtable_get(struct qtable_t *qtable, char *key) {
         //data_destroy(tempData);
         entry_destroy(tempEntry);
     }
-
+	//printf("Returning data with size: %d\n", data->datasize);
     // Em caso de sucesso
     free(op);
-    //free(tempKey);
+    for (b = 0; b < qtable->numServers; b++) {
+        if (ret[b] && ret[b]->content.value) {
+            //printf("Apagando data %d\n", b);
+            data_destroy(ret[b]->content.value);
+        }
+    }
     qtable_free_quorum_op_t(ret, qtable->numServers);
+
+    if (!data->data) {
+        data_destroy(data);
+        data = NULL;
+    }
+
+    if (tempKey) {
+        free(tempKey);
+    }
+	
     return data;
     
 }
@@ -437,8 +455,7 @@ int qtable_del(struct qtable_t *qtable, char *key) {
 	
 	// Aloca memória para a operação
 	struct quorum_op_t *op;
-	if((op = (struct quorum_op_t *) malloc(sizeof(struct
-												  quorum_op_t)))== NULL) {
+	if((op = (struct quorum_op_t *) malloc(sizeof(struct quorum_op_t)))== NULL) {
 		ERROR("malloc op");
 		return -1;
 	}
@@ -474,74 +491,80 @@ int qtable_del(struct qtable_t *qtable, char *key) {
 	}
 	
 	// Verifica se o maxTS foi alterado
-	if(maxTS > 0) {
+	if(maxTS >= 0) {
 		// Incrementa o timestamp e adiciona o id do cliente
 		maxTS = update_timestamp(maxTS, qtable->id);
-	}
-	
-	// Cria uma data com o value a NULL e actualiza o timestamp
-	struct data_t *tempData;
-	if((tempData = data_create(0)) == NULL) {
-		ERROR("data_dup");
-		free(op);
-		free(tempKey);
-		qtable_free_quorum_op_t(ret, qtable->numServers);
-		return -1;
-	}
-	tempData->timestamp = maxTS;
-	
-	// Cria uma entrada nova com a key e a data actualizada
-	struct entry_t *tempEntry;
-	if((tempEntry = entry_create(tempKey, tempData)) == NULL) {
-		ERROR("entry_create");
-		free(op);
-		free(tempKey);
-		qtable_free_quorum_op_t(ret, qtable->numServers);
-		data_destroy(tempData);
-		return -1;
-	}
-	
-	// Configura a operação para inserir a entrada
-	op->opcode = OP_RT_PUT;
-	op->content.entry = tempEntry;
-	
-	// Limpa a ret antes de receber as novas respostas
-	qtable_free_quorum_op_t(ret, qtable->numServers);
-	
-	// Recebe as respostas dos vários servidores
-	if((ret = quorum_access(op, (qtable->numServers/2) + 1)) == NULL) {
-		ERROR("quorum_access OP_RT_PUT");
-		free(op);
-		free(tempKey);
-		qtable_free_quorum_op_t(ret, qtable->numServers);
-		data_destroy(tempData);
-		entry_destroy(tempEntry);
-		return -1;
-	}
-	
-	// Verifica as respostas
-	for(i = 0; i < qtable->numServers; i++) {
-		if(ret[i] && (ret[i]->content.result != 0)) {
-			/*ERROR("invalid put");
-			 free(op);
-			 free(tempKey);
-			 qtable_free_quorum_op_t(ret, qtable->numServers);
-			 data_destroy(tempData);
-			 entry_destroy(tempEntry);
-			 return -1;*/
-			printf("tivemos um erro.\n");
+		
+		// Cria uma data com o value a NULL e actualiza o timestamp
+		struct data_t *tempData;
+		if((tempData = data_create(0)) == NULL) {
+			ERROR("data_dup");
+			free(op);
+			free(tempKey);
+			qtable_free_quorum_op_t(ret, qtable->numServers);
+			return -1;
 		}
-	}
+		tempData->timestamp = maxTS;
+		
+		// Cria uma entrada nova com a key e a data actualizada
+		struct entry_t *tempEntry;
+		if((tempEntry = entry_create(tempKey, tempData)) == NULL) {
+			ERROR("entry_create");
+			free(op);
+			free(tempKey);
+			qtable_free_quorum_op_t(ret, qtable->numServers);
+			data_destroy(tempData);
+			return -1;
+		}
+		
+		// Configura a operação para inserir a entrada
+		op->opcode = OP_RT_PUT;
+		op->content.entry = tempEntry;
+		
+		// Limpa a ret antes de receber as novas respostas
+		qtable_free_quorum_op_t(ret, qtable->numServers);
+		
+		// Recebe as respostas dos vários servidores
+		if((ret = quorum_access(op, (qtable->numServers/2) + 1)) == NULL) {
+			ERROR("quorum_access OP_RT_PUT");
+			free(op);
+			free(tempKey);
+			qtable_free_quorum_op_t(ret, qtable->numServers);
+			data_destroy(tempData);
+			entry_destroy(tempEntry);
+			return -1;
+		}
+		
+		// Verifica as respostas
+		for(i = 0; i < qtable->numServers; i++) {
+			if(ret[i] && (ret[i]->content.result != 0)) {
+				/*ERROR("invalid put");
+				 free(op);
+				 free(tempKey);
+				 qtable_free_quorum_op_t(ret, qtable->numServers);
+				 data_destroy(tempData);
+				 entry_destroy(tempEntry);
+				 return -1;*/
+				//printf("tivemos um erro.\n");
+			}
+		}
+		
+		// Em caso de sucesso
+		free(op);
+		//free(tempKey);
+		qtable_free_quorum_op_t(ret, qtable->numServers);
+		//data_destroy(tempData);
+		entry_destroy(tempEntry);
+		
+		return 0;
+	}  
 	
-	// Em caso de sucesso
+	// Em caso de não ter encontrado a entrada a eliminar
 	free(op);
-	//free(tempKey);
+	free(tempKey);
 	qtable_free_quorum_op_t(ret, qtable->numServers);
-	//data_destroy(tempData);
-	entry_destroy(tempEntry);
-	//printf("qtable_put: done!\n");
-	return 0;
 	
+	return -1;
 }
 
 /* Devolve numero (aproximado) de elementos da tabela ou -1 em caso de
@@ -589,7 +612,7 @@ int qtable_size(struct qtable_t *qtable) {
 			free(op);
 			qtable_free_quorum_op_t(ret, qtable->numServers);
 			return -1;
-			printf("tivemos um erro no qtable_size.\n");
+			//printf("tivemos um erro no qtable_size.\n");
 		}
 	}
 	
@@ -614,7 +637,7 @@ int qtable_size(struct qtable_t *qtable) {
  */
 char **qtable_get_keys(struct qtable_t *qtable) {
 	
-	int i, j;           // Usado em ciclos
+	int i, j, b;           // Usado em ciclos
 	int nElem = 0;      // Usado para registar os elementos de cada array
 	int maxElem = 0;    // Usado para registar o maior numero de keys
 	int index = 0;      // Usado para registar o array com maior número de keys
@@ -649,37 +672,33 @@ char **qtable_get_keys(struct qtable_t *qtable) {
 	
 	// Verifica as respostas
 	for(i = 0; i < qtable->numServers; i++) {
-		if(ret[i]) {
-			if(ret[i]->content.keys[0]) {
-				// Para cada resposta do servidor detrmina o número de elementos
-				for(j = 0; ret[i]->content.keys[j]; j++) {
-					nElem++;
-				}
-				
-				// Compara com o número máximo de elementos verificados até ao momento
-				if(nElem > maxElem) {
-					maxElem = nElem;
-					index = i;
-				}
-				nElem = 0;
+		if(ret[i] && ret[i]->content.keys) {
+			// Para cada resposta do servidor detrmina o número de elementos
+			for(j = 0; ret[i]->content.keys[j]; j++) {
+				nElem++;
 			}
+			
+			// Compara com o número máximo de elementos verificados até ao momento
+			if(nElem > maxElem) {
+				maxElem = nElem;
+				index = i;
+			}
+			nElem = 0;
 		}
-		else {
-			ERROR("invalid keys");
-			free(op);
-			qtable_free_quorum_op_t(ret, qtable->numServers);
-			return NULL;
-		}
-		
 	}
 	
 	// Aloca memória para as chaves a retornar
 	char **keys;
-	if((keys = (char **) malloc(sizeof(char *) * maxElem)) == NULL) {
+	if((keys = (char **) malloc(sizeof(char *) * (maxElem + 1))) == NULL) {
 		ERROR("malloc keys");
 		free(op);
+		for(b = 0; b < qtable->numServers; b ++) {
+			if(ret[b]->content.keys) {
+				qtable_free_keys(ret[b]->content.keys);
+			}
+		}
 		qtable_free_quorum_op_t(ret, qtable->numServers);
-		return -1;
+		return NULL;
 	}
 	
 	// Duplica cada chave
@@ -688,15 +707,26 @@ char **qtable_get_keys(struct qtable_t *qtable) {
 		if((keys[i] = strdup(ret[index]->content.keys[i])) == NULL) {
 			ERROR("malloc keys");
 			free(op);
+			for(b = 0; b < qtable->numServers; b ++) {
+				if(ret[b]->content.keys) {
+					qtable_free_keys(ret[b]->content.keys);
+				}
+			}
 			qtable_free_quorum_op_t(ret, qtable->numServers);
 			qtable_free_keys(keys);
 			return NULL;
 		}
 		
 	}
+	keys[maxElem] = NULL;
 	
 	// Em caso de sucesso
 	free(op);
+	for(b = 0; b < qtable->numServers; b ++) {
+		if(ret[b] && ret[b]->content.keys) {
+			qtable_free_keys(ret[b]->content.keys);
+		}
+	}
 	qtable_free_quorum_op_t(ret, qtable->numServers);
 	return keys;
 	
@@ -728,7 +758,7 @@ void qtable_free_quorum_op_t(struct quorum_op_t **ret, int n) {
                 free(ret[i]);
             }
         }
-        free(ret);
+        //free(ret);
     }
 	
 }

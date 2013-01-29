@@ -205,6 +205,7 @@ struct data_t *rtable_get(struct rtable_t *table, char *key) {
         free_message(rsp);
         return NULL;
     }
+	//printf("Criei um data de tamanho: %d\n", data->datasize);
 
     //em caso de sucesso
     free_message(rsp);
@@ -395,7 +396,7 @@ long rtable_get_ts(struct rtable_t *table, char *key) {
 
     // Em caso de sucesso
     long ts = rsp->content.timestamp;
-	printf("Timestamp recebido: %ld\n", ts);
+	//printf("Timestamp recebido: %ld\n", ts);
     free_message(rsp);
     return ts;
 

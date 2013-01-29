@@ -37,6 +37,7 @@
 #define ERROR(a) fprintf( stderr, "%s : %d : "#a"\n", __FUNCTION__, __LINE__)
 //#define ERROR(a)
 
-#define PRINT_LATENCIES 1
+#define PRINT_LATENCIES 0
+#define ZERO "MA=="
 
 #endif

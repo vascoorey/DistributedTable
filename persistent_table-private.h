@@ -25,5 +25,7 @@ struct ptable_t {
     struct pmanager_t *pmanager;
 };
 
+int ptable_collect_garbage(struct ptable_t *ptable);
+
 #endif
 

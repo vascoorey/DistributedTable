@@ -38,9 +38,13 @@ struct data_t *data_create(int size) {
     }
     //No caso da data ser NULL
     else if (!size) {
-        new_data->data = NULL;
-        new_data->datasize = size;
-        new_data->timestamp = 0;
+		if(!(new_data->data = malloc(1))) {
+			ERROR("malloc");
+			return NULL;
+		}
+        memcpy(new_data->data, "0", 1);
+		new_data->datasize = 1;
+		new_data->timestamp = 0;
     }
     else {
         ERROR("data_create");

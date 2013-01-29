@@ -124,10 +124,9 @@ int executeComand(struct qtable_t *remoteTable) {
 
         //apanha a primeira sequência de caracteres...
         comand = strtok(comandLine, " \n");
-
+		int comandSize;
         //... verifica o tamanho do comando...
-        int comandSize = strlen(comand);
-        if(comand != NULL && comandSize >= 3 && comandSize <= 7) {
+        if(comand != NULL && (comandSize = strlen(comand)) >= 3 && comandSize <= 7) {
             int i;
             //... e converte-a para lowercase
             for(i = 0; i < comandSize; i++) {
@@ -214,15 +213,25 @@ int executeComand(struct qtable_t *remoteTable) {
             }
 
             //recupera a entrada correspondente à chave
-            struct data_t *data;
-            if((data = qtable_get(remoteTable, key)) != NULL) {
-                printf("> Entrada recuperada\n"
-                        ">   - Chave: %s\n>   - Entrada: %s\n",
-                        key, (char *) data->data);
-            }
-            else {
-                printf("> Entrada não existente na tabela.\n");
-            }
+            struct data_t *data = NULL;
+            if((data = qtable_get(remoteTable, key))) {
+				char *str = malloc(data->datasize + 1);
+				memcpy(str, data->data, data->datasize);
+				str[data->datasize] = '\0';
+				
+				if(strcmp(str, "0") == 0) {
+					// É uma entrada a null / nao existente.
+					printf("> Entrada não existente na tabela.\n");
+				} else {
+					printf("> Entrada recuperada\n"
+						   ">   - Chave: %s\n>   - Entrada: %s\n",
+						   key, str);
+				}
+				free(str);
+            } else {
+				// Just in case, mas nunca devemos chegar aqui
+				printf("> Entrada não existente na tabela.\n");
+			}
 
             //em caso de sucesso
 			if(data) {
@@ -284,7 +293,7 @@ int executeComand(struct qtable_t *remoteTable) {
                 int i = 0;
                 if(keys && keys[i]) {
 					printf("> Chaves da tabela:\n");
-                    while (keys[i] != NULL) {
+                    while (keys[i]) {
                         printf(">   - %s\n", keys[i]);
                         free(keys[i]);
                         i++;

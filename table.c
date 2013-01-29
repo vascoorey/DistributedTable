@@ -154,7 +154,7 @@ struct data_t *table_get(struct table_t *table, char *key) {
 
             // Aloca memória para a entra e copia-a
             if((tempData = data_create(tempEntry->value->datasize))) {
-
+				tempData->timestamp = tempEntry->value->timestamp;
                 // Copia a data e verifica se foi bem sucedido
                 memcpy(tempData->data, tempEntry->value->data, tempEntry->value->datasize);
                 if((memcmp(tempData->data, tempEntry->value->data, tempEntry->value->datasize) != 0)) {
@@ -415,7 +415,7 @@ long table_get_ts(struct table_t *table, char *key) {
 
     // Em caso de sucesso
     long ts = tempData->timestamp;
-	printf("Timestamp: %ld\n", ts);
+	//printf("Timestamp: %ld\n", ts);
     data_destroy(tempData);
     return ts;
 
